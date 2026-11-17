@@ -6,14 +6,14 @@
 <title>入站契约</title>
 <script src="/static/vue.global.prod.js"></script>
 <style>
-  :root{--paper:#f7f1e6;--ink:#2a2118;--line:#d9cbb6;--accent:#8b4513;--ok:#2f6f4e;--bad:#9b2c2c}
+  :root{--paper:#f7f1e6;--ink:#2a2118;--line:#d9cbb6;--accent:#8b4513;--ok:#2f6f4e;--bad:#9b2c2c;--warn:#a16207}
   *{box-sizing:border-box} body{margin:0;background:radial-gradient(900px 500px at 80% -10%,#fff8ea,transparent),var(--paper);color:var(--ink);font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
-  .sheet{max-width:980px;margin:0 auto;padding:28px 22px 48px}
+  .sheet{max-width:1080px;margin:0 auto;padding:28px 22px 48px}
   header{border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:18px;display:flex;justify-content:space-between;gap:16px}
   h1{font-family:Georgia,"Songti SC",serif;font-size:34px;margin:0;letter-spacing:.02em}
-  .lede{margin-top:6px;color:#6b5b4b;max-width:46ch;line-height:1.5}
-  .steps{display:flex;gap:0;margin:18px 0 22px;border:1px solid var(--line);background:#fffaf2}
-  .steps button{flex:1;border:0;border-right:1px solid var(--line);background:transparent;padding:12px 8px;cursor:pointer;font-weight:500}
+  .lede{margin-top:6px;color:#6b5b4b;max-width:52ch;line-height:1.5}
+  .steps{display:flex;gap:0;margin:18px 0 22px;border:1px solid var(--line);background:#fffaf2;flex-wrap:wrap}
+  .steps button{border:0;border-right:1px solid var(--line);background:transparent;padding:12px 10px;cursor:pointer;font-weight:500}
   .steps button:last-child{border-right:0}
   .steps button.on{background:#2a2118;color:#f7f1e6}
   .card{background:#fffaf2;border:1px solid var(--line);padding:16px 16px 8px;margin-bottom:14px}
@@ -21,15 +21,25 @@
   table{width:100%;border-collapse:collapse;font-size:14px}
   th,td{border-bottom:1px solid var(--line);padding:10px 6px;text-align:left;vertical-align:top}
   th{font-size:12px;text-transform:none;color:#6b5b4b}
-  input{width:100%;border:1px solid var(--line);background:#fff;padding:9px 10px;margin:6px 0 12px;border-radius:2px}
+  input,select{width:100%;border:1px solid var(--line);background:#fff;padding:9px 10px;margin:6px 0 12px;border-radius:2px}
   .primary{background:var(--accent);color:#fff;border:0;padding:10px 14px;cursor:pointer}
   .ghost{background:transparent;border:1px solid var(--ink);padding:7px 10px;cursor:pointer}
+  .linkbtn{background:none;border:0;color:var(--accent);text-decoration:underline;cursor:pointer;padding:0;font:inherit}
   .login{max-width:420px;margin:14vh auto;background:#fffaf2;border:1px solid var(--line);padding:28px}
   .err{color:var(--bad);min-height:18px}
+  .ok-msg{color:var(--ok);min-height:18px}
   .meta{font-size:13px;color:#6b5b4b}
   .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .stamp{display:inline-block;border:1.5px solid var(--ok);color:var(--ok);padding:2px 8px;font-size:12px}
   .stamp.bad{border-color:var(--bad);color:var(--bad)}
+  .stamp.warn{border-color:var(--warn);color:var(--warn)}
+  .stamp.muted{border-color:var(--line);color:#6b5b4b}
+  .radio-row{display:flex;gap:18px;margin:6px 0 12px}
+  .radio-row label{display:flex;align-items:center;gap:6px}
+  .radio-row input{width:auto;margin:0}
+  .kv{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;font-size:14px}
+  .kv .k{color:#6b5b4b}
+  .branch-note{font-size:13px;color:#6b5b4b;background:#fff;border:1px dashed var(--line);padding:10px;margin-bottom:10px;line-height:1.6}
 </style>
 </head>
 <body>
@@ -51,10 +61,12 @@ createApp({
   setup(){
     const token=ref(localStorage.getItem('contractlab_token')||'');
     const user=ref(localStorage.getItem('contractlab_user')||'');
-    const username=ref('admin'), password=ref('123456'), err=ref(''), tab=ref(0), actionErr=ref('');
-    const contracts=ref([]), batches=ref([]), buffers=ref([]), recon=ref({});
+    const username=ref('admin'), password=ref('123456'), err=ref(''), tab=ref(0), actionErr=ref(''), actionOk=ref('');
+    const contracts=ref([]), batches=ref([]), buffers=ref([]), recon=ref({}), ledger=ref([]), reviewList=ref([]);
+    const detail=ref(null), detailId=ref(''), detailErr=ref('');
     const form=ref({subject:'订单入站', payload_fields:'order_id,amount'});
-    const nav=['契约版本','入站校验','双写缓冲','契约对账'];
+    const sw=ref({subject:'订单入站', branch:'甲', target_version:'v4', version:'v5', required_fields:'order_id,amount,currency,channel,buyer_id', mode:'严格'});
+    const nav=['契约目录','入站列表','详情卡','切版策略','复核队列','双写缓冲','契约对账'];
     function auth(){return {Authorization:'Bearer '+token.value,'Content-Type':'application/json'};}
     async function login(){
       err.value='';
@@ -69,32 +81,72 @@ createApp({
       const r=await fetch(url,{headers:auth()});
       const j=await r.json().catch(()=>({}));
       if(r.status===401){ logout(); return null; }
-      return j;
+      return {ok:r.ok,body:j};
     }
     async function refresh(){
       if(!token.value) return;
       const c=await loadJson('/api/contracts'); if(c===null) return;
-      contracts.value=Array.isArray(c.items)?c.items:[];
+      contracts.value=Array.isArray(c.body.items)?c.body.items:[];
       const b=await loadJson('/api/ingress'); if(b===null) return;
-      batches.value=Array.isArray(b.items)?b.items:[];
+      batches.value=Array.isArray(b.body.items)?b.body.items:[];
       const u=await loadJson('/api/buffers'); if(u===null) return;
-      buffers.value=Array.isArray(u.items)?u.items:[];
+      buffers.value=Array.isArray(u.body.items)?u.body.items:[];
       const q=await loadJson('/api/reconcile'); if(q===null) return;
-      recon.value=q&&typeof q==='object'?q:{};
+      recon.value=q.body&&typeof q.body==='object'?q.body:{};
+      const l=await loadJson('/api/switch/ledger'); if(l===null) return;
+      ledger.value=Array.isArray(l.body.items)?l.body.items:[];
+      const rv=await loadJson('/api/reviews'); if(rv===null) return;
+      reviewList.value=Array.isArray(rv.body.items)?rv.body.items:[];
     }
     async function validate(){
-      actionErr.value='';
+      actionErr.value=''; actionOk.value='';
       const r=await fetch('/api/ingress/validate',{method:'POST',headers:auth(),body:JSON.stringify(form.value)});
-      const j=await r.json(); actionErr.value=r.ok?('校验结果：'+j.result+(j.missing?('；缺 '+j.missing.join(',')):'')):(j.detail||'失败');
+      const j=await r.json();
+      if(!r.ok){actionErr.value=j.detail||'失败';}
+      else {actionOk.value='校验结果：'+j.result+'（正式版 '+j.version+'）'+(j.missing?('；缺 '+j.missing.join(',')):'');}
+      await refresh();
+    }
+    async function openDetail(id){
+      detailErr.value=''; detail.value=null;
+      if(!id){detailErr.value='请输入批次号';return;}
+      const r=await fetch('/api/ingress/'+encodeURIComponent(id),{headers:auth()});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){detailErr.value=j.detail||'详情读取失败';return;}
+      detail.value=j; tab.value=2;
+    }
+    function stampClass(result){
+      if(result==='通过'||result==='已复核') return '';
+      if(result==='拒收'||result==='偏了') return 'bad';
+      if(result==='缓冲'||result==='待复核'||result==='争用') return 'warn';
+      return 'muted';
+    }
+    async function doSwitch(){
+      actionErr.value=''; actionOk.value='';
+      const payload={subject:sw.value.subject, branch:sw.value.branch};
+      if(sw.value.branch==='甲'){payload.target_version=sw.value.target_version;}
+      else{payload.version=sw.value.version;payload.required_fields=sw.value.required_fields;payload.mode=sw.value.mode;}
+      const r=await fetch('/api/contracts/switch',{method:'POST',headers:auth(),body:JSON.stringify(payload)});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){actionErr.value=(r.status===409?('['+j.detail+'] '):'')+(j.detail||'切版失败');}
+      else{actionOk.value='切版生效：'+j.branch+'支 '+j.from_version+' → '+j.to_version;}
+      await refresh();
+    }
+    async function closeReview(id){
+      actionErr.value='';
+      const r=await fetch('/api/reviews/'+id+'/close',{method:'POST',headers:auth()});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok){actionErr.value=j.detail||'闭环失败';}
       await refresh();
     }
     onMounted(()=>{if(token.value)refresh();});
-    return {token,user,username,password,err,tab,nav,contracts,batches,buffers,recon,form,actionErr,login,logout,validate};
+    return {token,user,username,password,err,tab,nav,contracts,batches,buffers,recon,ledger,reviewList,
+      form,sw,actionErr,actionOk,detail,detailId,detailErr,
+      login,logout,validate,refresh,openDetail,doSwitch,closeReview,stampClass};
   },
   template:`
   <div v-if="!token" class="login">
     <h1>入站契约</h1>
-    <p class="lede">按启用正式契约校验入站字段；缺字段按严格模式拒收或兼容模式进缓冲。</p>
+    <p class="lede">按启用正式契约校验入站字段；正式版切换走切版策略簿互斥写路径，切后裁决、目录、详情、复核同源对读。</p>
     <label>用户名</label><input v-model="username"/><label>密码</label><input type="password" v-model="password"/>
     <div class="err">{{err}}</div><button class="primary" @click="login">打开契约簿</button>
   </div>
@@ -102,44 +154,132 @@ createApp({
     <header>
       <div>
         <h1>入站契约</h1>
-        <div class="lede">Schema 版本约束入站校验，破坏性变更缓冲或拒收，并与落库结果对账。</div>
+        <div class="lede">Schema 版本约束入站校验；切版与入站裁决同读正式指针，禁止双正式并存，禁止切版成功仍读旧必填。</div>
       </div>
-      <div class="meta">{{user}} · 本地 SQLite<br/><button class="ghost" style="margin-top:8px" @click="logout">退出</button></div>
+      <div class="meta">{{user}} · 本地 SQLite 单机文件库<br/><button class="ghost" style="margin-top:8px" @click="logout">退出</button></div>
     </header>
     <div class="steps"><button v-for="(n,i) in nav" :key="n" :class="{on:tab===i}" @click="tab=i">{{i+1}}. {{n}}</button></div>
+
+    <div class="err">{{actionErr}}</div><div class="ok-msg">{{actionOk}}</div>
+
     <div class="card" v-show="tab===0">
-      <h2>现行契约</h2>
-      <table><thead><tr><th>版本</th><th>主题</th><th>模式 / 轨</th><th>状态</th><th>必填字段</th></tr></thead>
-      <tbody><tr v-for="c in contracts" :key="c.id">
-        <td>{{c.version}}</td><td>{{c.subject}}</td><td>{{c.mode}} / {{c.track}}</td><td>{{c.status}}</td><td>{{c.required_fields}}</td>
-      </tr></tbody></table>
+      <h2>契约目录（采集目录）</h2>
+      <table><thead><tr><th>版本</th><th>主题</th><th>模式 / 轨</th><th>状态</th><th>必填字段</th><th>正式指针</th></tr></thead>
+        <tbody><tr v-for="c in contracts" :key="c.id">
+          <td>{{c.version}}</td><td>{{c.subject}}</td><td>{{c.mode}} / {{c.track}}</td>
+          <td><span class="stamp" :class="stampClass(c.status)">{{c.status}}</span></td>
+          <td>{{c.required_fields}}</td>
+          <td><span v-if="c.is_active" class="stamp">当前正式</span><span v-else class="meta">—</span></td>
+        </tr></tbody></table>
     </div>
+
     <div class="pair" v-show="tab===1">
       <div class="card">
         <h2>提交入站</h2>
         <label>主题</label><input v-model="form.subject"/>
         <label>载荷字段</label><input v-model="form.payload_fields"/>
-        <button class="primary" @click="validate">按正式契约校验</button>
-        <div class="err">{{actionErr}}</div>
+        <button class="primary" @click="validate">按当前正式指针裁决</button>
       </div>
       <div class="card">
-        <h2>最近批次</h2>
-        <table><thead><tr><th>批次</th><th>结果</th><th>说明</th></tr></thead>
-        <tbody><tr v-for="b in (batches||[]).slice(0,8)" :key="b.id">
-          <td>#{{b.id}} {{b.subject}}</td>
-          <td><span class="stamp" :class="{bad:b.result!=='通过'}">{{b.result}}</span></td>
-          <td>{{b.detail}}</td>
-        </tr></tbody></table>
+        <h2>入站列表</h2>
+        <table><thead><tr><th>批次</th><th>裁决版本</th><th>结果</th><th>说明</th><th></th></tr></thead>
+          <tbody><tr v-for="b in batches" :key="b.id">
+            <td>#{{b.id}} {{b.subject}}</td><td>{{b.contract_version}}</td>
+            <td><span class="stamp" :class="stampClass(b.result)">{{b.result}}</span></td>
+            <td>{{b.detail}}</td>
+            <td><button class="linkbtn" @click="openDetail(b.id)">详情卡</button></td>
+          </tr></tbody></table>
       </div>
     </div>
+
     <div class="card" v-show="tab===2">
+      <h2>批次详情卡</h2>
+      <div style="display:flex;gap:10px;align-items:flex-end">
+        <div style="flex:1"><label>批次号</label><input v-model="detailId" placeholder="例如 1"/></div>
+        <button class="primary" @click="openDetail(detailId)">对读详情</button>
+      </div>
+      <div class="err">{{detailErr}}</div>
+      <template v-if="detail">
+        <div class="kv" style="margin:10px 0">
+          <div class="k">批次</div><div>#{{detail.batch.id}} · {{detail.batch.subject}} · {{detail.batch.created_at}}</div>
+          <div class="k">载荷字段</div><div>{{detail.batch.payload_fields}}</div>
+          <div class="k">原判结果</div><div><span class="stamp" :class="stampClass(detail.batch.result)">{{detail.batch.result}}</span>（{{detail.batch.detail}}）</div>
+          <div class="k">裁决时契约</div><div>{{detail.adjudicated_contract.version}} · 必填 {{detail.adjudicated_contract.required_fields}}</div>
+          <div class="k">当前正式指针</div><div>{{detail.active_pointer.version}}（{{detail.active_pointer.updated_at}} 切换）</div>
+        </div>
+        <h2 style="font-size:17px">切版重裁记录</h2>
+        <table v-if="detail.reviews.length"><thead><tr><th>复核</th><th>原判</th><th>新判</th><th>新缺字段</th><th>重裁依据</th><th>状态</th></tr></thead>
+          <tbody><tr v-for="r in detail.reviews" :key="r.id">
+            <td>#{{r.id}}</td><td><span class="stamp" :class="stampClass(r.old_result)">{{r.old_result}}</span></td>
+            <td><span class="stamp" :class="stampClass(r.new_result)">{{r.new_result}}</span></td>
+            <td>{{r.missing||'—'}}</td><td>{{r.contract_version}} / {{r.reason}}</td>
+            <td><span class="stamp" :class="stampClass(r.status)">{{r.status}}</span></td>
+          </tr></tbody></table>
+        <p v-else class="meta">该批次尚无切版重裁记录。</p>
+      </template>
+    </div>
+
+    <div class="card" v-show="tab===3">
+      <h2>切版策略附页</h2>
+      <div class="branch-note">
+        互斥写路径二选一，一支到底不得混用：<br/>
+        <b>甲支</b>：旧正式停用与新正式启用<b>同一事务</b>提交，随即按新必填重裁在途批次（重裁进复核队列）。<br/>
+        <b>乙支</b>：先落待晋升草稿，确认无双正式后原子切正式指针。<br/>
+        选定分支当天写入策略簿即锁定：同支再请求记「切版争用」，异支请求记「切版偏了」，均拒绝不生效。
+      </div>
+      <div class="pair">
+        <div>
+          <label>主题</label><input v-model="sw.subject"/>
+          <label>切版分支</label>
+          <div class="radio-row">
+            <label><input type="radio" value="甲" v-model="sw.branch"/>甲支：同事务停用/启用+重裁</label>
+            <label><input type="radio" value="乙" v-model="sw.branch"/>乙支：待晋升草稿+原子指针</label>
+          </div>
+          <template v-if="sw.branch==='甲'">
+            <label>目标正式候选版本（须已存在且停用）</label><input v-model="sw.target_version"/>
+          </template>
+          <template v-else>
+            <label>草稿版本号</label><input v-model="sw.version"/>
+            <label>草稿必填字段（逗号分隔）</label><input v-model="sw.required_fields"/>
+            <label>模式</label><select v-model="sw.mode"><option>严格</option><option>兼容</option></select>
+          </template>
+          <button class="primary" @click="doSwitch">提交切版（写策略簿）</button>
+        </div>
+        <div>
+          <h2 style="font-size:17px">策略簿流水</h2>
+          <table><thead><tr><th>日期</th><th>主题</th><th>支</th><th>版本流向</th><th>值班</th><th>状态</th><th>说明</th></tr></thead>
+            <tbody><tr v-for="l in ledger" :key="l.id">
+              <td>{{l.switch_date}}</td><td>{{l.subject}}</td><td>{{l.branch}}</td>
+              <td>{{l.from_version||'—'}} → {{l.to_version||'—'}}</td><td>{{l.operator}}</td>
+              <td><span class="stamp" :class="stampClass(l.status)">{{l.status}}</span></td><td>{{l.detail}}</td>
+            </tr></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" v-show="tab===4">
+      <h2>复核队列（切版重裁）</h2>
+      <table><thead><tr><th>复核</th><th>批次</th><th>主题</th><th>原判</th><th>新判</th><th>新缺字段</th><th>依据版本</th><th>状态</th><th></th></tr></thead>
+        <tbody><tr v-for="r in reviewList" :key="r.id">
+          <td>#{{r.id}}</td><td><button class="linkbtn" @click="openDetail(r.batch_id)">#{{r.batch_id}}</button></td>
+          <td>{{r.subject}}</td>
+          <td><span class="stamp" :class="stampClass(r.old_result)">{{r.old_result}}</span></td>
+          <td><span class="stamp" :class="stampClass(r.new_result)">{{r.new_result}}</span></td>
+          <td>{{r.missing||'—'}}</td><td>{{r.contract_version}}</td>
+          <td><span class="stamp" :class="stampClass(r.status)">{{r.status}}</span></td>
+          <td><button v-if="r.status==='待复核'" class="ghost" @click="closeReview(r.id)">闭环</button></td>
+        </tr></tbody></table>
+    </div>
+
+    <div class="card" v-show="tab===5">
       <h2>双写缓冲</h2>
       <table><thead><tr><th>缓冲</th><th>批次</th><th>主题</th><th>原因</th></tr></thead>
-      <tbody><tr v-for="b in buffers" :key="b.id"><td>{{b.id}}</td><td>{{b.batch_id}}</td><td>{{b.subject}}</td><td>{{b.reason}}</td></tr></tbody></table>
+        <tbody><tr v-for="b in buffers" :key="b.id"><td>{{b.id}}</td><td>{{b.batch_id}}</td><td>{{b.subject}}</td><td>{{b.reason}}</td></tr></tbody></table>
     </div>
-    <div class="card" v-show="tab===3">
+    <div class="card" v-show="tab===6">
       <h2>契约对账摘要</h2>
-      <p>入站 {{recon.ingress_total}} · 通过 {{recon.passed}} · 缓冲 {{recon.buffered}} · 拒收 {{recon.rejected}} · 缓冲行 {{recon.buffer_rows}} · 对齐 {{recon.aligned}}</p>
+      <p>入站 {{recon.ingress_total}} · 通过 {{recon.passed}} · 缓冲 {{recon.buffered}} · 拒收 {{recon.rejected}} · 缓冲行 {{recon.buffer_rows}} · 缓冲对齐 {{recon.aligned}}</p>
+      <p>双正式主题数 <b :style="recon.dual_formal_subjects?'color:var(--bad)':''">{{recon.dual_formal_subjects}}</b>（须恒为 0） · 待复核 {{recon.open_reviews}}</p>
     </div>
   </div>`
 }).mount('#app');
